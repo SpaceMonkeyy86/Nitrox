@@ -9,7 +9,7 @@ internal sealed class FireDousedProcessor(EntityRegistry entityRegistry) : IAuth
 
     public async Task Process(AuthProcessorContext context, FireDoused packet)
     {
-        if (packet.IsExtinguished)
+        if (packet.Health <= 0f)
         {
             entityRegistry.RemoveEntity(packet.Id);
         }
