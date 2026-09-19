@@ -32,7 +32,7 @@ public sealed partial class CyclopsExternalDamageManager_CreatePoint_Patch : Nit
                     int index = Array.IndexOf(__instance.damagePoints, damagePoint);
                     if (index != -1)
                     {
-                        Resolve<Cyclops>().OnCreateDamagePoint(__instance.subRoot, index);
+                        Resolve<Cyclops>().OnCreateDamagePoint(__instance.subRoot, damagePoint, index);
                         return;
                     }
                 }

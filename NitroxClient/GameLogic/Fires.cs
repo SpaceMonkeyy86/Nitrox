@@ -1,6 +1,5 @@
-﻿using System.Collections.Generic;
-using Nitrox.Model.DataStructures;
-using Nitrox.Model.Subnautica.DataStructures.GameLogic;
+﻿using Nitrox.Model.DataStructures;
+using Nitrox.Model.Subnautica.DataStructures.GameLogic.Entities;
 using Nitrox.Model.Subnautica.Packets;
 using NitroxClient.Communication.Abstract;
 using NitroxClient.MonoBehaviours;
@@ -18,13 +17,11 @@ namespace NitroxClient.GameLogic
     /// </summary>
     public class Fires
     {
-        private readonly Entities entities;
         private readonly IPacketSender packetSender;
         private readonly ThrottledPacketSender throttledPacketSender;
 
-        public Fires(Entities entities, IPacketSender packetSender, ThrottledPacketSender throttledPacketSender)
+        public Fires(IPacketSender packetSender, ThrottledPacketSender throttledPacketSender)
         {
-            this.entities = entities;
             this.packetSender = packetSender;
             this.throttledPacketSender = throttledPacketSender;
         }
@@ -40,9 +37,12 @@ namespace NitroxClient.GameLogic
                 return;
             }
 
-            NitroxId fireId = NitroxEntity.GenerateNewId(fire.transform.parent.gameObject);
+            GameObject gameObject = fire.transform.parent.gameObject;
 
-            CyclopsFireCreated packet = new(fireId, subRootId, room.roomLinks.room, nodeIndex);
+            NitroxId fireId = NitroxEntity.GenerateNewId(gameObject);
+            CyclopsFireEntity entity = new(room.roomLinks.room, nodeIndex, fireId, subRootId);
+
+            EntitySpawnedByClient packet = new(entity);
             packetSender.Send(packet);
         }
 
@@ -58,59 +58,9 @@ namespace NitroxClient.GameLogic
             }
 
             bool extinguished = !fire.livemixin.IsAlive() || fire.isExtinguished;
-            if (extinguished)
-            {
-                entities.RemoveEntity(fireId);
-            }
 
             FireDoused packet = new(fireId, extinguished ? 0 : fire.livemixin.health);
             throttledPacketSender.SendThrottled(packet, x => x.Id);
-        }
-
-        /// <summary>
-        ///     Create a new <see cref="Fire" />. Majority of code copied from <see cref="SubFire.CreateFire(SubFire.RoomFire)" />.
-        ///     Currently does not support Fires created outside of a Cyclops
-        /// </summary>
-        public void Create(CyclopsFireData fireData)
-        {
-            SubFire subFire = NitroxEntity.RequireObjectFrom(fireData.CyclopsId).GetComponent<SubRoot>().damageManager.subFire;
-            SubFire.RoomFire roomFire = subFire.roomFires[fireData.Room];
-            Transform spawnNode = roomFire.spawnNodes[fireData.NodeIndex];
-
-            // If a fire already exists at the node, replace the old Id with the new one
-            if (spawnNode.childCount > 0)
-            {
-                Transform existingFire = spawnNode.GetComponentInChildren<Fire>().transform.parent;
-
-                if (existingFire.TryGetNitroxId(out NitroxId existingFireId) && existingFireId != fireData.FireId)
-                {
-                    Log.Warn($"Fire already exists at node index {fireData.NodeIndex}! Replacing existing Fire Id {existingFireId} with Id {fireData.FireId}");
-
-                    NitroxEntity.SetNewId(existingFire.gameObject, fireData.FireId);
-                }
-
-                return;
-            }
-
-            roomFire.fireValue++;
-
-            PrefabSpawn component = spawnNode.GetComponent<PrefabSpawn>();
-            if (!component)
-            {
-                Log.Error(
-                    $"Cannot create new Cyclops fire! PrefabSpawn component could not be found in fire node! Fire Id: {fireData.FireId} SubRoot Id: {fireData.CyclopsId} Room: {fireData.Room} NodeIndex: {fireData.NodeIndex}");
-                return;
-            }
-
-            component.SpawnManual(gameObject =>
-            {
-                Fire fire = gameObject.GetComponentInChildren<Fire>();
-                if (fire)
-                {
-                    fire.fireSubRoot = subFire.subRoot;
-                    NitroxEntity.SetNewId(fire.transform.parent.gameObject, fireData.FireId);
-                }
-            });
         }
     }
 }
