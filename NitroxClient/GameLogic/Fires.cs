@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System.Linq;
 using Nitrox.Model.Core;
 using Nitrox.Model.DataStructures;
 using Nitrox.Model.Subnautica.DataStructures.GameLogic.Entities;
@@ -20,9 +21,21 @@ namespace NitroxClient.GameLogic
     /// </summary>
     public class Fires
     {
-        private readonly Dictionary<NitroxId, Dictionary<SessionId, float>> douseRates = [];
+        // Which fires we are currently broadcasting as dousing
+        private readonly HashSet<NitroxId> currentlyDousing = [];
+
+        // Whether Douse() was called on a fire this frame
+        private readonly HashSet<NitroxId> dousedThisFrame = [];
+
+        // The last douse rate per second of a fire
+        private readonly Dictionary<NitroxId, float> localDouseRates = [];
+
         private readonly LocalPlayer localPlayer;
+
         private readonly IPacketSender packetSender;
+
+        // How much other players are dousing fires
+        private readonly Dictionary<NitroxId, Dictionary<SessionId, float>> remoteDouseRates = [];
 
         public Fires(IPacketSender packetSender, LocalPlayer localPlayer)
         {
@@ -50,43 +63,86 @@ namespace NitroxClient.GameLogic
             packetSender.Send(packet);
         }
 
-        // When our client starts/stops dousing a fire
-        public void OnDouseChange(Fire fire, float douseRate)
+        public void OnDouse(Fire fire, float amount)
         {
-            if (localPlayer.SessionId == null || !fire.transform.parent.TryGetIdOrWarn(out NitroxId fireId))
+            if (PacketSuppressor<FireDoused>.IsSuppressed)
             {
                 return;
             }
 
-            FireDoused packet = new(fireId, fire.livemixin.health, localPlayer.SessionId.Value, douseRate, false);
-            packetSender.Send(packet);
+            if (!fire.transform.parent.TryGetIdOrWarn(out NitroxId fireId))
+            {
+                return;
+            }
+
+            if (fire.livemixin.health <= 0f || fire.IsExtinguished())
+            {
+                FireDoused packet = new(fireId, fire.livemixin.health, null, 0f, true);
+                packetSender.Send(packet);
+                Unregister(fireId);
+                return;
+            }
+
+            if (amount >= 20f)
+            {
+                // Large values are one-time and not done every frame
+                FireDoused packet = new(fireId, fire.livemixin.health, null, 0f, true);
+                packetSender.Send(packet);
+                return;
+            }
+
+            localDouseRates[fireId] = amount / Time.deltaTime;
+            dousedThisFrame.Add(fireId);
         }
 
-        // For large health updates (i.e. fire suppression system ticks)
-        public void OnDouseOnce(Fire fire)
+        public void OnUpdate(Fire fire)
         {
             if (!fire.transform.parent.TryGetIdOrWarn(out NitroxId fireId))
             {
                 return;
             }
 
-            FireDoused packet = new(fireId, fire.livemixin.health, null, 0f, true);
-            packetSender.Send(packet);
-        }
+            // Fires don't track whether are not they are currently being doused.
+            // Instead, the FireExtinguisher just calls Douse() on the fire every
+            // frame, or not at all if the extinguisher is not in use.
+            // We detect this method call by continuously updating dousedThisFrame,
+            // then convert that into a more stable flag in currentlyDoused.
 
-        // When our client extinguishes a fire
-        public void OnExtinguish(Fire fire)
-        {
-            if (!fire.transform.parent.TryGetIdOrWarn(out NitroxId fireId))
+            bool isDousing = dousedThisFrame.Contains(fireId);
+            bool wasDousing = currentlyDousing.Contains(fireId);
+
+            if (isDousing && !wasDousing)
             {
-                return;
+                currentlyDousing.Add(fireId);
+                float douseRate = localDouseRates.GetOrDefault(fireId, 20f);
+                FireDoused packet = new(fireId, fire.livemixin.health, localPlayer.SessionId, douseRate, false);
+                packetSender.Send(packet);
+            }
+            else if (!isDousing && wasDousing)
+            {
+                currentlyDousing.Remove(fireId);
+                FireDoused packet = new(fireId, fire.livemixin.health, localPlayer.SessionId, 0f, false);
+                packetSender.Send(packet);
             }
 
-            FireDoused packet = new(fireId, 0f, null, 0f, false);
-            packetSender.Send(packet);
+            dousedThisFrame.Remove(fireId);
+
+            if (remoteDouseRates.TryGetValue(fireId, out Dictionary<SessionId, float> rates))
+            {
+                // Smoothly apply damage effect from other players
+                float douseAmount = rates.Values.Sum() * Time.deltaTime;
+                if (douseAmount > 0f)
+                {
+                    using (PacketSuppressor<FireDoused>.Suppress())
+                    {
+                        float time = fire.lastTimeDoused;
+                        fire.Douse(douseAmount);
+                        fire.lastTimeDoused = time;
+                    }
+                }
+            }
         }
 
-        // When another client starts/stops dousing a fire
         public void Douse(NitroxId fireId, float health, SessionId? sessionId, float douseRate, bool oneShot)
         {
             Optional<GameObject> fireGameObject = NitroxEntity.GetObjectFrom(fireId);
@@ -96,7 +152,7 @@ namespace NitroxClient.GameLogic
                 return;
             }
 
-            Fire fire = fireGameObject.Value.GetComponent<Fire>();
+            Fire fire = fireGameObject.Value.GetComponentInChildren<Fire>();
             if (!fire)
             {
                 Log.Error($"Fire object with id {fireId} missing component");
@@ -117,20 +173,28 @@ namespace NitroxClient.GameLogic
             {
                 // Fire health went up
                 fire.livemixin.health = health;
+                fire.Douse(0f);
             }
 
             if (health <= 0f)
             {
                 fire.Extinguished();
-                douseRates.Remove(fireId);
+                Unregister(fireId);
                 return;
             }
 
             if (!oneShot && sessionId.HasValue)
             {
-                douseRates.TryAdd(fireId, []);
-                douseRates[fireId][sessionId.Value] = douseRate;
+                remoteDouseRates.TryAdd(fireId, []);
+                remoteDouseRates[fireId][sessionId.Value] = douseRate;
             }
+        }
+
+        private void Unregister(NitroxId id)
+        {
+            remoteDouseRates.Remove(id);
+            localDouseRates.Remove(id);
+            currentlyDousing.Remove(id);
         }
     }
 }
