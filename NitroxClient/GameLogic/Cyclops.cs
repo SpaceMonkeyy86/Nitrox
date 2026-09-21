@@ -29,9 +29,8 @@ namespace NitroxClient.GameLogic
 
         public void BroadcastMetadataChange(NitroxId id)
         {
-            GameObject gameObject = NitroxEntity.RequireObjectFrom(id);
-            CyclopsGameObject cyclops = new() { GameObject = gameObject };
-            entities.EntityMetadataChanged(cyclops, id);
+            SubRoot subRoot = NitroxEntity.RequireObjectFrom(id).RequireComponent<SubRoot>();
+            entities.EntityMetadataChanged(subRoot, id);
         }
 
         public void BroadcastLaunchDecoy(NitroxId id)
@@ -100,6 +99,8 @@ namespace NitroxClient.GameLogic
             {
                 return;
             }
+
+            NitroxEntity.RemoveFrom(damagePoint.gameObject);
 
             EntityDestroyed packet = new(id);
             packetSender.Send(packet);

@@ -58,8 +58,8 @@ public sealed partial class Welder_Weld_Patch : NitroxPatch, IDynamicPatch
             float newHealth = Math.Min(live.health + addHealth, live.maxHealth);
             result = newHealth - num;
 
-            // Currently we only handle vehicle or Cyclops repairs
-            if (live.TryGetIdOrWarn(out NitroxId id) && (live.GetComponent<Vehicle>() || live.GetComponent<CyclopsDamagePoint>()))
+            // Currently we only handle vehicle repairs
+            if (live.TryGetIdOrWarn(out NitroxId id) && (live.GetComponent<Vehicle>()))
             {
                 if (Resolve<SimulationOwnership>().HasAnyLockType(id))
                 {

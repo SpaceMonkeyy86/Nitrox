@@ -125,8 +125,6 @@ namespace NitroxClient.GameLogic
                 packetSender.Send(packet);
             }
 
-            dousedThisFrame.Remove(fireId);
-
             if (remoteDouseRates.TryGetValue(fireId, out Dictionary<SessionId, float> rates))
             {
                 // Smoothly apply damage effect from other players
@@ -135,12 +133,12 @@ namespace NitroxClient.GameLogic
                 {
                     using (PacketSuppressor<FireDoused>.Suppress())
                     {
-                        float time = fire.lastTimeDoused;
                         fire.Douse(douseAmount);
-                        fire.lastTimeDoused = time;
                     }
                 }
             }
+
+            dousedThisFrame.Remove(fireId);
         }
 
         public void Douse(NitroxId fireId, float health, SessionId? sessionId, float douseRate, bool oneShot)

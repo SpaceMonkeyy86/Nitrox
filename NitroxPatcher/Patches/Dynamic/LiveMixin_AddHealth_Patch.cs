@@ -45,7 +45,10 @@ public sealed partial class LiveMixin_AddHealth_Patch : NitroxPatch, IDynamicPat
             switch (monoBehaviour)
             {
                 case RadiationLeak radiationLeak:
-                    HandleRadiationLeakRepair(radiationLeak);
+                    HandleGenericLeakRepair(radiationLeak);
+                    return;
+                case CyclopsDamagePoint cyclopsDamagePoint:
+                    HandleGenericLeakRepair(cyclopsDamagePoint);
                     return;
                 case BaseCell baseCell:
                     HandleBaseLeakRepair(baseCell, __instance);
@@ -56,14 +59,14 @@ public sealed partial class LiveMixin_AddHealth_Patch : NitroxPatch, IDynamicPat
         HandleGenericEntity(__instance);
     }
 
-    private static void HandleRadiationLeakRepair(RadiationLeak radiationLeak)
+    private static void HandleGenericLeakRepair(MonoBehaviour component)
     {
-        if (!CanBroadcast || !radiationLeak.TryGetNitroxId(out NitroxId leakId))
+        if (!CanBroadcast || !component.TryGetNitroxId(out NitroxId leakId))
         {
             return;
         }
-        
-        Optional<EntityMetadata> metadata = Resolve<EntityMetadataManager>().Extract(radiationLeak);
+
+        Optional<EntityMetadata> metadata = Resolve<EntityMetadataManager>().Extract(component);
         if (metadata.HasValue)
         {
             Resolve<Entities>().BroadcastMetadataUpdate(leakId, metadata.Value);
